@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Configure NEOS email for remote solves
+# Configure NEOS email
 os.environ['NEOS_EMAIL'] = 'parichay.nitwarangal@gmail.com'
 
 # Load and clean the Pyomo model script once
@@ -43,20 +43,16 @@ def run_optimization(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
     solver.solve(model, opt='bonmin', tee=False)
 
     # Helper to get numeric values
-        # Helper to get numeric values without boolean checks
     def val(key):
-        # Prefer variables defined in local namespace
         if key in local:
             v = local[key]
-        # Then try model component
         elif hasattr(model, key):
             v = getattr(model, key)
         else:
             return None
-        # Extract numeric value
         try:
             return float(pyo.value(v))
-        except Exception:
+        except:
             if isinstance(v, (int, float)):
                 return float(v)
             return None
@@ -75,7 +71,7 @@ def run_optimization(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
         row = {'Station': m['Station']}
         for key,label in [('NOP','No. of Pumps'), ('DR','Drag Reduction (%)'), ('Speed','Pump Speed (RPM)'),
                           ('Residual Head','Residual Head (m)'), ('Discharge Head','Station Discharge Head (m)'),
-                          ('Efficiency','Pump Efficiency (%)'), ('Power Cost','Power Cost (₹)'), ('DRA Cost','DRA Cost (₹)')]:
+                          ('Efficiency','Pump Efficiency Fraction'), ('Power Cost','Power Cost (₹)'), ('DRA Cost','DRA Cost (₹)')]:
             row[label] = val(m[key])
         rows.append(row)
 
@@ -94,23 +90,42 @@ SFC_S     = st.sidebar.number_input("SFC at Surendranagar (gm/bhp/hr)", value=20
 RateDRA   = st.sidebar.number_input("DRA Rate (Rs/L)", value=9.0)
 Price_HSD = st.sidebar.number_input("HSD Price (Rs/L)", value=80.0)
 
-# Run button
+# Main app
+
 def main():
     if st.sidebar.button("Run Optimization"):
         with st.spinner("Running optimization on NEOS..."):
-            rows, total_cost = run_optimization(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD)
+            rows, total_cost = run_optimization(
+                FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD
+            )
         st.success("Optimization Complete!")
 
-        # Display total cost
-        st.header(f"Total Operating Cost: ₹{total_cost:,.2f}")
+        # Bold total cost heading
+        st.markdown(f"**Total Operating Cost: ₹{total_cost:,.2f}**")
+
+        # Prepare DataFrame
+        df = pd.DataFrame(rows).set_index('Station')
+        # Format columns
+        df['No. of Pumps'] = df['No. of Pumps'].fillna(0).astype(int)
+        df['Pump Speed (RPM)'] = df['Pump Speed (RPM)'].round(2)
+        df['Residual Head (m)'] = df['Residual Head (m)'].round(2)
+        df['Station Discharge Head (m)'] = df['Station Discharge Head (m)'].round(2)
+        df['Power Cost (₹)'] = df['Power Cost (₹)'].round(2)
+        df['DRA Cost (₹)'] = df['DRA Cost (₹)'].round(2)
+        # Convert efficiency fraction to percentage string
+        df['Pump Efficiency (%)'] = df['Pump Efficiency Fraction'].apply(
+            lambda x: f"{x*100:.2f}%" if x is not None else None
+        )
+        df.drop(columns=['Pump Efficiency Fraction'], inplace=True)
 
         # Display station-wise table
-        df = pd.DataFrame(rows).set_index('Station')
-        st.subheader("Station-wise Results")
+        st.subheader("**Station-wise Results**")
         st.table(df)
     else:
         st.title("Pipeline Optimization App")
-        st.markdown("Enter inputs in the sidebar and click **Run Optimization** to see station-wise pump counts, speeds, heads, efficiencies, and costs.")
+        st.markdown(
+            "Enter inputs in the sidebar and click **Run Optimization** to see station-wise pump counts, speeds, heads, efficiencies, and costs."
+        )
 
 if __name__ == '__main__':
     main()
