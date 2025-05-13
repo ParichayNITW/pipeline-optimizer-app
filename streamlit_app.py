@@ -43,13 +43,23 @@ def run_optimization(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
     solver.solve(model, opt='bonmin', tee=False)
 
     # Helper to get numeric values
+        # Helper to get numeric values without boolean checks
     def val(key):
-        v = local.get(key) or getattr(model, key, None)
-        if hasattr(v, 'is_expression') or hasattr(v, 'is_variable'):
+        # Prefer variables defined in local namespace
+        if key in local:
+            v = local[key]
+        # Then try model component
+        elif hasattr(model, key):
+            v = getattr(model, key)
+        else:
+            return None
+        # Extract numeric value
+        try:
             return float(pyo.value(v))
-        if isinstance(v, (int, float)):
-            return float(v)
-        return None
+        except Exception:
+            if isinstance(v, (int, float)):
+                return float(v)
+            return None
 
     # Define mapping for each station
     mapping = [
