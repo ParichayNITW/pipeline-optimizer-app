@@ -11,20 +11,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-# Header with logos and title
-col1, col2, col3 = st.columns([1,6,1])
-with col1:
-    st.image(
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Indian_Oil_Corporation_Logo.svg/120px-Indian_Oil_Corporation_Logo.svg.png",
-        width=60
-    )
-with col2:
-    st.markdown("# Mixed Integer Non-Linear Convex Optimisation of Pipeline Operations")
-with col3:
-    st.image(
-        "https://images.unsplash.com/photo-1590487988183-7fd160517c9d?auto=format&fit=crop&w=120&q=60",
-        width=60
-    )
+# Title only
+st.title("Mixed Integer Non-Linear Convex Optimisation of Pipeline Operations")
 
 # Sidebar inputs
 st.sidebar.header("Pipeline Inputs")
@@ -37,7 +25,7 @@ SFC_S     = st.sidebar.number_input("SFC at Surendranagar (gm/bhp/hr)", value=20
 RateDRA   = st.sidebar.number_input("DRA Rate (Rs/L)", value=9.0)
 Price_HSD = st.sidebar.number_input("HSD Price (Rs/L)", value=80.0)
 
-# Footer function
+# Footer
 def footer():
     st.markdown("---")
     st.markdown(
@@ -46,10 +34,10 @@ def footer():
         "</div>", unsafe_allow_html=True
     )
 
-# Configure NEOS solver email
+# Configure NEOS email
 os.environ['NEOS_EMAIL'] = 'parichay.nitwarangal@gmail.com'
 
-# Load and sanitize Pyomo model script
+# Load and clean model script
 @st.cache_resource
 def load_script():
     with open('opt.txt') as f:
@@ -59,117 +47,91 @@ def load_script():
     code = re.sub(r'.*input\(.*', '', code)
     code = re.sub(r'print\(.*', '', code)
     return code
-
 SCRIPT = load_script()
 
-# Solve model and return model + namespace
-def solve_model(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
-    ns = dict(
-        os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
-        FLOW=FLOW, KV=KV, rho=rho,
-        SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
-        RateDRA=RateDRA, Price_HSD=Price_HSD
-    )
+# Solve model
+def solve_model():
+    ns = dict(os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
+              FLOW=FLOW, KV=KV, rho=rho,
+              SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
+              RateDRA=RateDRA, Price_HSD=Price_HSD)
     exec(SCRIPT, ns)
     model = ns['model']
     solver = SolverManagerFactory('neos')
     solver.solve(model, opt='bonmin', tee=False)
     return model, ns
 
-# Main logic
+# Main UI
 if st.sidebar.button("Run Optimization"):
-    with st.spinner("Optimizing via NEOS... please wait"):
-        model, ns = solve_model(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD)
+    with st.spinner("Solving optimization via NEOS, please wait..."):
+        model, ns = solve_model()
     st.success("Optimization Complete!")
 
-    # Display total cost
-    total_cost = pyo.value(model.Objf)
-    st.markdown(
-        f"<h1 style='text-align:center; font-weight:bold;'>"
-        f"Total Operating Cost: ₹{total_cost:,.2f}"
-        f"</h1>", unsafe_allow_html=True
-    )
+    # Total cost
+    total = pyo.value(model.Objf)
+    st.markdown(f"<h1 style='text-align:center; font-weight:bold;'>Total Operating Cost: ₹{total:,.2f}</h1>", unsafe_allow_html=True)
 
-    # Stations and parameter definitions
-    stations_info = OrderedDict([
-        ('Vadinar',       {'idx':'1','dr_idx':'1'}),
-        ('Jamnagar',      {'idx':'2','dr_idx':'2'}),
-        ('Rajkot',        {'idx':'3','dr_idx':'3'}),
-        ('Chotila',       {'idx':'4','dr_idx':None}),
-        ('Surendranagar', {'idx':'5','dr_idx':'4'}),
-        ('Viramgam',      {'idx':'6','dr_idx':None}),
+    # Define stations and params
+    stations = OrderedDict([
+        ('Vadinar',       '1'),
+        ('Jamnagar',      '2'),
+        ('Rajkot',        '3'),
+        ('Chotila',       '4'),
+        ('Surendranagar', '5'),
+        ('Viramgam',      '6'),
     ])
-    params = OrderedDict([
-        ('No. of Pumps', ('NOP','idx')),
-        ('Drag Reduction (%)', ('DR','dr_idx')),
-        ('Maximum Allowable Operating Pressure (bar)', ('MAOP','idx')),
-        ('Velocity (m/s)', ('v','idx')),
-        ('Reynolds Number', ('Re','idx')),
-        ('Friction Factor', ('f','idx')),
-        ('Dynamic Head Loss (m)', ('DH','idx')),
-        ('Head developed by each Pump (m)', ('TDHA_PUMP','idx')),
-        ('Pump Speed (RPM)', ('N','idx')),
-        ('Pump Efficiency (%)', ('EFFP','idx')),
-        ('Station Discharge Head (m)', ('SDHA','idx')),
-        ('Residual Head (m)', ('RH','idx')),
-        ('Power Cost (₹)', ('OF_POWER','idx')),
-        ('DRA Cost (₹)', ('OF_DRA','idx')),
+    # Map parameter label to var base and drag index special
+    param_map = OrderedDict([
+        ('No. of Pumps', 'NOP'),
+        ('Drag Reduction (%)', 'DR'),
+        ('Maximum Allowable Operating Pressure (bar)', 'MAOP'),
+        ('Velocity (m/s)', 'v'),
+        ('Reynolds Number', 'Re'),
+        ('Friction Factor', 'f'),
+        ('Dynamic Head Loss (m)', 'DH'),
+        ('Head developed by each Pump (m)', 'TDHA_PUMP'),
+        ('Pump Speed (RPM)', 'N'),
+        ('Pump Efficiency (%)', 'EFFP'),
+        ('Station Discharge Head (m)', 'SDHA'),
+        ('Residual Head (m)', 'RH'),
+        ('Power Cost (₹)', 'OF_POWER'),
+        ('DRA Cost (₹)', 'OF_DRA'),
     ])
-    keys = list(params.keys())
-    p_idx = keys.index('No. of Pumps')
-    s_idx = keys.index('Pump Speed (RPM)')
-    e_idx = keys.index('Pump Efficiency (%)')
-    rh_idx = keys.index('Residual Head (m)')
-
-    # Build result rows
     rows = []
-    for station, info in stations_info.items():
-        row = []
-        for label, (base, fld) in params.items():
-            idx = info.get(fld)
-            if idx is None:
-                row.append(None)
+    for label, base in param_map.items():
+        row = {'Parameter': label}
+        for stn, idx in stations.items():
+            # skip drag for chotila/viramgam
+            if base == 'DR' and stn not in ['Vadinar','Jamnagar','Rajkot','Surendranagar']:
+                row[stn] = None
                 continue
-            delim = '_' if base in ['MAOP','DH','TDHA_PUMP','SDHA','OF_POWER','OF_DRA','RH'] else ''
-            varname = f"{base}{delim}{idx}"
-            v = ns.get(varname) if varname in ns else getattr(model, varname, None)
-            try:
-                num = float(pyo.value(v))
-            except:
-                num = float(v) if isinstance(v, (int, float)) else None
-            if label == 'No. of Pumps' and num is not None:
-                num = int(num)
-            elif num is not None:
-                num = round(num, 2)
-            row.append(num)
-        # override RH1
-        if station == 'Vadinar': row[rh_idx] = 50.00
-        # Chotila & Viramgam only show RH
-        if station in ['Chotila','Viramgam']:
-            rh = row[rh_idx]
-            row = [None]*len(keys)
-            row[rh_idx] = rh
-        # speed and efficiency adjustments
-        if station not in ['Chotila','Viramgam'] and row[p_idx] == 0:
-            row[s_idx] = 0.00
-            row[e_idx] = '0.00%'
-        if station not in ['Chotila','Viramgam'] and row[p_idx] > 0:
-            frac = row[e_idx]
-            row[e_idx] = f"{frac*100:.2f}%" if frac is not None else None
+            # build var name
+            var = f"{base}_{idx}"
+            # handle RH1 override
+            if base=='RH' and stn=='Vadinar':
+                val = 50.0
+            else:
+                val_obj = ns.get(var) if var in ns else getattr(model, var, None)
+                try:
+                    val = float(pyo.value(val_obj))
+                except:
+                    val = float(val_obj) if isinstance(val_obj,(int,float)) else None
+            # format
+            if label=='No. of Pumps' and val is not None:
+                row[stn] = int(val)
+            elif label=='Pump Efficiency (%)' and val is not None:
+                row[stn] = f"{val*100:.2f}%"
+            elif val is not None:
+                row[stn] = round(val,2)
+            else:
+                row[stn] = None
         rows.append(row)
+    df = pd.DataFrame(rows).set_index('Parameter')
 
-    # Create DataFrame
-    df = pd.DataFrame(rows, index=list(stations_info.keys()), columns=keys).T
-
-    # Style and display
+    # Display styled table
     st.subheader("Station-wise Parameter Summary")
-    styled = df.style \
-        .format(precision=2) \
-        .applymap(lambda v: 'font-weight:bold;' if isinstance(v, int) else '', subset=['No. of Pumps']) \
-        .background_gradient(cmap='Blues', subset=[c for c in df.columns if c!='No. of Pumps']) \
-        .highlight_max(axis=1)
-    st.dataframe(styled, use_container_width=True)
+    st.table(df)
     footer()
 else:
-    st.markdown("Enter your pipeline inputs in the sidebar and click **Run Optimization** to view results.")
+    st.markdown("Enter inputs and click **Run Optimization** to view results.")
     footer()
