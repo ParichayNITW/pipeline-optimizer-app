@@ -15,13 +15,13 @@ st.title("Mixed Integer Non-Linear Convex Optimisation of Pipeline Operations")
 
 # Sidebar inputs
 st.sidebar.header("Pipeline Inputs")
-FLOW    = st.sidebar.number_input("Flow rate (KL/Hr)", value=1000.0)
-KV      = st.sidebar.number_input("Kinematic Viscosity (cSt)", value=10.0)
-rho     = st.sidebar.number_input("Density (kg/m3)", value=850.0)
-SFC_J   = st.sidebar.number_input("SFC at Jamnagar (gm/bhp/hr)", value=200.0)
-SFC_R   = st.sidebar.number_input("SFC at Rajkot (gm/bhp/hr)", value=200.0)
-SFC_S   = st.sidebar.number_input("SFC at Surendranagar (gm/bhp/hr)", value=200.0)
-RateDRA = st.sidebar.number_input("DRA Rate (Rs/L)", value=9.0)
+FLOW      = st.sidebar.number_input("Flow rate (KL/Hr)", value=1000.0)
+KV        = st.sidebar.number_input("Kinematic Viscosity (cSt)", value=10.0)
+rho       = st.sidebar.number_input("Density (kg/m3)", value=850.0)
+SFC_J     = st.sidebar.number_input("SFC at Jamnagar (gm/bhp/hr)", value=200.0)
+SFC_R     = st.sidebar.number_input("SFC at Rajkot (gm/bhp/hr)", value=200.0)
+SFC_S     = st.sidebar.number_input("SFC at Surendranagar (gm/bhp/hr)", value=200.0)
+RateDRA   = st.sidebar.number_input("DRA Rate (Rs/L)", value=9.0)
 Price_HSD = st.sidebar.number_input("HSD Price (Rs/L)", value=80.0)
 
 # Footer
@@ -33,11 +33,11 @@ def footer():
         "</div>", unsafe_allow_html=True
     )
 
-# Configure NEOS solver
+# NEOS configuration
 ios_email = 'parichay.nitwarangal@gmail.com'
 os.environ['NEOS_EMAIL'] = ios_email
 
-# Load and clean model script
+# Load and clean Pyomo script
 @st.cache_resource
 def load_script():
     with open('opt.txt') as f:
@@ -47,9 +47,10 @@ def load_script():
     code = re.sub(r'.*input\(.*', '', code)
     code = re.sub(r'print\(.*', '', code)
     return code
+
 SCRIPT = load_script()
 
-# Solve model
+# Solve model and return namespace
 def solve_model():
     ns = dict(os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
               FLOW=FLOW, KV=KV, rho=rho,
@@ -66,79 +67,68 @@ if st.sidebar.button("Run Optimization"):
         model, ns = solve_model()
     st.success("Optimization Complete!")
 
-    # Display total cost
+    # Total operating cost
     total = pyo.value(model.Objf)
     st.markdown(
-        f"<h1 style='text-align:center; font-weight:bold;'>" +
-        f"Total Operating Cost: ₹{total:,.2f}" +
+        f"<h1 style='text-align:center; font-weight:bold;'>"
+        f"Total Operating Cost: ₹{total:,.2f}"
         f"</h1>", unsafe_allow_html=True
     )
 
-    # Station list and params
+    # Station identifiers
     stations = OrderedDict([
         ('Vadinar','1'), ('Jamnagar','2'), ('Rajkot','3'),
         ('Chotila','4'), ('Surendranagar','5'), ('Viramgam','6')
     ])
-    param_map = OrderedDict([
-        ('No. of Pumps','NOP'), ('Drag Reduction (%)','DR'),
-        ('Maximum Allowable Operating Pressure (bar)','MAOP'),
-        ('Velocity (m/s)','v'), ('Reynolds Number','Re'),
-        ('Friction Factor','f'), ('Dynamic Head Loss (m)','DH'),
-        ('Head developed by each Pump (m)','TDHA_PUMP'),
-        ('Pump Speed (RPM)','N'), ('Pump Efficiency (%)','EFFP'),
-        ('Station Discharge Head (m)','SDHA'), ('Residual Head (m)','RH'),
-        ('Power Cost (₹)','OF_POWER'), ('DRA Cost (₹)','OF_DRA')
+    # Parameters to include
+    desired = OrderedDict([
+        ('No. of Pumps','NOP'),
+        ('Drag Reduction (%)','DR'),
+        ('Pump Speed (RPM)','N'),
+        ('Pump Efficiency (%)','EFFP'),
+        ('Station Discharge Head (m)','SDHA'),
+        ('Residual Head (m)','RH'),
+        ('Power Cost (₹)','OF_POWER'),
+        ('DRA Cost (₹)','OF_DRA')
     ])
 
+    # Build results
     rows = []
-    for label, base in param_map.items():
+    for label, base in desired.items():
         row = {'Parameter': label}
         for stn, idx in stations.items():
-            # skip drag for non-applicable
+            # skip invalid drag
             if base=='DR' and stn not in ['Vadinar','Jamnagar','Rajkot','Surendranagar']:
-                row[stn] = None
-                continue
-            # determine var name
-            if base in ['MAOP','DH','TDHA_PUMP','SDHA','OF_POWER','OF_DRA','RH']:
-                varname = f"{base}_{idx}"
+                val = None
             else:
-                varname = f"{base}{idx}"
-            # override RH1
-            if base=='RH' and stn=='Vadinar':
-                val = 50.0
-            else:
-                vobj = ns.get(varname) if varname in ns else getattr(model, varname, None)
-                try:
-                    val = float(pyo.value(vobj))
-                except:
-                    val = float(vobj) if isinstance(vobj,(int,float)) else None
+                # handle var naming
+                if base in ['SDHA','OF_POWER','OF_DRA','RH']:
+                    varname = f"{base}_{idx}"
+                else:
+                    varname = f"{base}{idx}"
+                # override RH1
+                if base=='RH' and stn=='Vadinar':
+                    val = 50.0
+                else:
+                    obj = ns.get(varname) if varname in ns else getattr(model, varname, None)
+                    try:
+                        val = float(pyo.value(obj))
+                    except:
+                        val = None
             # format
             if label=='No. of Pumps' and val is not None:
-                row[stn] = int(val)
+                val = int(val)
             elif label=='Pump Efficiency (%)' and val is not None:
-                row[stn] = f"{val*100:.2f}%"
+                val = f"{val*100:.2f}%"
             elif val is not None:
-                row[stn] = round(val,2)
-            else:
-                row[stn] = None
-        # Chotila/Viramgam only RH
-        if stn in ['Chotila','Viramgam'] and label!='Residual Head (m)':
-            row = {'Parameter': label}
-            for s2 in stations.keys(): row[s2] = None
-            # set RH
-            rhvar = f"RH_{stations[stn]}"
-            row['Residual Head (m)'] = float(pyo.value(ns.get(rhvar, model.component(rhvar)))) if True else None
-        # zero speed/eff
-        if label in ['Pump Speed (RPM)','Pump Efficiency (%)'] and row.get(stn)==0:
-            row[stn] = 0 if label=='Pump Speed (RPM)' else '0.00%'
+                val = round(val,2)
+            row[stn] = val
         rows.append(row)
 
     df = pd.DataFrame(rows).set_index('Parameter')
-# Only show raw output values without parameter labels
-df_values = df.values
-st.subheader("Station-wise Parameter Summary")
-st.table(df_values)
+    st.subheader("Station-wise Parameter Summary")
+    st.table(df)
     footer()
 else:
-    st.markdown("Enter inputs and click **Run Optimization** to view results.")
+    st.markdown("Enter pipeline inputs and click **Run Optimization** to view results.")
     footer()
