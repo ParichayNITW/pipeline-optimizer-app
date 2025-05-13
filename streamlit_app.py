@@ -149,16 +149,14 @@ if st.sidebar.button("Run Optimization"):
             frac=row[e_idx]; row[e_idx]=f"{frac*100:.2f}%" if frac is not None else None
         result_data[station]=row
 
-        # Display attractive styled table
+            # Build DataFrame for styling
+    df = pd.DataFrame(result_data, index=keys)
     st.subheader("Station-wise Parameter Summary")
     # Style DataFrame: conditional formatting and gradient
     styled = df.style \
         .format(precision=2) \
         .applymap(lambda v: "font-weight: bold;" if isinstance(v, int) else "", subset=["No. of Pumps"]) \
-        .background_gradient(subset=df.columns.drop("No. of Pumps"), cmap="Blues", axis=0) \
+        .background_gradient(subset=[c for c in df.columns if c != "No. of Pumps"], cmap="Blues", axis=0) \
         .highlight_max(color="lightgreen", axis=1)
     st.dataframe(styled, use_container_width=True)
-    footer()
-else:
-    st.markdown("Enter your pipeline inputs in the sidebar and click **Run Optimization** to view results.")
     footer()
