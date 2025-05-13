@@ -4,7 +4,7 @@ import pyomo.environ as pyo
 from pyomo.opt import SolverManagerFactory
 import pandas as pd
 
-# Title and page config
+# Page configuration and title
 st.set_page_config(
     page_title="Mixed Integer Non-Linear Convex Optimisation of Pipeline Operations",
     layout="wide",
@@ -23,10 +23,19 @@ SFC_S     = st.sidebar.number_input("SFC at Surendranagar (gm/bhp/hr)", value=20
 RateDRA   = st.sidebar.number_input("DRA Rate (Rs/L)", value=9.0)
 Price_HSD = st.sidebar.number_input("HSD Price (Rs/L)", value=80.0)
 
-# Configure NEOS
+# Footer function
+def footer():
+    st.markdown("---")
+    st.markdown(
+        "<div style='text-align:center; color:gray; font-size:12px;'>"
+        "© 2025 Developed by Parichay Das. All rights reserved."  
+        "</div>", unsafe_allow_html=True
+    )
+
+# Configure NEOS solver email
 os.environ['NEOS_EMAIL'] = 'parichay.nitwarangal@gmail.com'
 
-# Load Pyomo model script
+# Load and sanitize the Pyomo model (cached)
 @st.cache_resource
 def load_script():
     with open('opt.txt') as f:
@@ -39,35 +48,38 @@ def load_script():
 
 SCRIPT = load_script()
 
-# Solver function
+# Solve model and return results
 @st.cache_data
 def solve_model(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
-    ns = dict(os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
-              FLOW=FLOW, KV=KV, rho=rho,
-              SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
-              RateDRA=RateDRA, Price_HSD=Price_HSD)
+    ns = dict(
+        os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
+        FLOW=FLOW, KV=KV, rho=rho,
+        SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
+        RateDRA=RateDRA, Price_HSD=Price_HSD
+    )
     exec(SCRIPT, ns)
     model = ns['model']
     solver = SolverManagerFactory('neos')
     solver.solve(model, opt='bonmin', tee=False)
     return model, ns
 
-# On button
+# Main logic
 if st.sidebar.button("Run Optimization"):
-    with st.spinner("Running optimization via NEOS..."):
+    with st.spinner("Optimizing via NEOS... please wait"):
         model, ns = solve_model(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD)
-    st.markdown(f"<h1 style='text-align:center'>Total Operating Cost: ₹{pyo.value(model.Objf):,.2f}</h1>", unsafe_allow_html=True)
+    st.success("Optimization Complete!")
 
-    # Station parameter mapping
-    stations = {
-        'Vadinar': 1,
-        'Jamnagar': 2,
-        'Rajkot': 3,
-        'Chotila': 4,
-        'Surendranagar': 5,
-        'Viramgam': 6
-    }
-    # Parameters to extract
+    # Display total operating cost (large, bold)
+    total_cost = pyo.value(model.Objf)
+    st.markdown(
+        f"<h1 style='text-align:center; font-weight:bold;'>"
+        f"Total Operating Cost: ₹{total_cost:,.2f}"
+        f"</h1>", unsafe_allow_html=True
+    )
+
+    # Define stations of interest
+    stations = {'Vadinar':1, 'Jamnagar':2, 'Rajkot':3, 'Surendranagar':5}
+    # Parameters mapping
     params = {
         'No. of Pumps': 'NOP',
         'Drag Reduction (%)': 'DR',
@@ -76,37 +88,41 @@ if st.sidebar.button("Run Optimization"):
         'Reynolds Number': 'Re',
         'Friction Factor': 'f',
         'Dynamic Head Loss (m)': 'DH',
-        'Pump Head Developed (m)': 'TDHA_PUMP'
+        'Pump Head Developed (m)': 'TDHA_PUMP',
+        'Residual Head (m)': 'RH'
     }
-    # Build DataFrame
+    # Build transposed DataFrame
     data = {}
-    for stat, idx in stations.items():
-        col = []
-        for label, key in params.items():
-            var = f"{key}{idx}"
+    for station, idx in stations.items():
+        values = []
+        for label, base in params.items():
+            var = f"{base}{idx}"
+            # get from namespace or model
             if var in ns:
-                val = ns[var]
+                val_obj = ns[var]
             elif hasattr(model, var):
-                val = getattr(model, var)
+                val_obj = getattr(model, var)
             else:
-                val = None
+                val_obj = None
             try:
-                num = float(pyo.value(val))
+                num = float(pyo.value(val_obj))
             except:
-                num = float(val) if isinstance(val, (int, float)) else None
-            if label == 'No. of Pumps' and num is not None:
+                num = float(val_obj) if isinstance(val_obj, (int,float)) else None
+            # No decimal for pumps
+            if label=='No. of Pumps' and num is not None:
                 num = int(num)
-            col.append(num)
-        data[stat] = col
+            # Two decimals otherwise
+            if num is not None and label!='No. of Pumps':
+                num = round(num,2)
+            values.append(num)
+        data[station] = values
     df = pd.DataFrame(data, index=list(params.keys()))
-    df = df.round(2)
 
-    # Transposed table display
+    # Table title and display
     st.subheader("Station-wise Parameter Summary")
     st.table(df)
 
-    # Footer
-    st.markdown("---")
-    st.markdown("<div style='text-align:center; color:gray; font-size:12px;'>© 2025 Developed by Parichay Das. All rights reserved.</div>", unsafe_allow_html=True)
+    footer()
 else:
-    st.markdown("Enter your pipeline inputs in the sidebar and click **Run Optimization**.")
+    st.markdown("Enter your pipeline inputs in the sidebar and click **Run Optimization** to view results.")
+    footer()
