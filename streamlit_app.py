@@ -112,11 +112,7 @@ if st.sidebar.button("Run Optimization"):
             else:
                 data[param].append(None)
 
-    df = pd.DataFrame(data, index=list(stations.keys())).T
-    st.subheader("Station-wise Parameter Summary")
-    st.table(df)
-    footer()
-else:(data, index=list(stations.keys())).T
+        df = pd.DataFrame(data, index=list(stations.keys())).T
     st.subheader("Station-wise Parameter Summary")
     st.table(df)
     footer()
