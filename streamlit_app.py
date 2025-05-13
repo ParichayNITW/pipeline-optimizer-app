@@ -32,73 +32,92 @@ def footer():
         "</div>", unsafe_allow_html=True
     )
 
-# NEOS configuration
-ios_email = 'parichay.nitwarangal@gmail.com'
-os.environ['NEOS_EMAIL'] = ios_email
+# Set NEOS email for remote solves
+os.environ['NEOS_EMAIL'] = 'parichay.nitwarangal@gmail.com'
 
-# Load model script
-@st.cache_resource
+# Load and clean Pyomo script (no caching to avoid micropip issues)
 def load_script():
-    code = []
     with open('opt.txt') as f:
-        for ln in f:
-            if ln.strip().startswith(('!pip','print','input')):
-                continue
-            code.append(ln)
-    return ''.join(code)
+        lines = [l for l in f if not l.strip().startswith(('!pip','print','input'))]
+    return ''.join(lines)
+
 SCRIPT = load_script()
 
-# Solve model
+# Solve model and return Pyomo model
 def solve_model():
-    ns = dict(os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
-              FLOW=FLOW, KV=KV, rho=rho,
-              SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
-              RateDRA=RateDRA, Price_HSD=Price_HSD)
+    # Prepare namespace for exec
+    ns = dict(
+        os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
+        FLOW=FLOW, KV=KV, rho=rho,
+        SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
+        RateDRA=RateDRA, Price_HSD=Price_HSD
+    )
     exec(SCRIPT, ns)
     model = ns['model']
+    # Solve remotely via NEOS
     SolverManagerFactory('neos').solve(model, opt='bonmin', tee=False)
-    return model, ns
+    return model
 
-if st.sidebar.button("Run Optimization"):
-    model, ns = solve_model()
-    # Total cost
-    total = pyo.value(model.Objf)
-    st.markdown(f"<h1 style='text-align:center; font-weight:bold;'>Total Operating Cost: ₹{total:,.2f}</h1>", unsafe_allow_html=True)
+# Run optimization and display results
+def main():
+    if st.sidebar.button("Run Optimization"):
+        model = solve_model()
+        # Total Operating Cost
+        total = pyo.value(model.Objf)
+        st.markdown(
+            f"<h1 style='text-align:center; font-weight:bold;'>"
+            f"Total Operating Cost: ₹{total:,.2f}"
+            f"</h1>", unsafe_allow_html=True
+        )
 
-    # Stations and elements
-    stations = OrderedDict([('Vadinar','1'),('Jamnagar','2'),('Rajkot','3'),('Chotila','4'),('Surendranagar','5'),('Viramgam','6')])
-    desired = OrderedDict([
-        ('No. of Pumps','NOP'),('Drag Reduction (%)','DR'),('Pump Speed (RPM)','N'),
-        ('Pump Efficiency (%)','EFFP'),('Station Discharge Head (m)','SDHA'),
-        ('Residual Head (m)','RH'),('Power Cost (₹)','OF_POWER'),('DRA Cost (₹)','OF_DRA')
-    ])
-    data = {k:[] for k in desired}
-    for param, base in desired.items():
-        for stn, idx in stations.items():
-            # Chotila & Viramgam: zero except RH
-            if stn in ['Chotila','Viramgam'] and base!='RH':
-                val = 0.0
-            else:
-                varname = f"{base}_{idx}" if base in ['SDHA','OF_POWER','OF_DRA','RH'] else f"{base}{idx}"
-                # RH override
-                if base=='RH' and stn=='Vadinar':
-                    val = 50.0
+        # Station codes
+        stations = OrderedDict([
+            ('Vadinar','1'), ('Jamnagar','2'), ('Rajkot','3'),
+            ('Chotila','4'), ('Surendranagar','5'), ('Viramgam','6')
+        ])
+        # Desired outputs
+        params = OrderedDict([
+            ('No. of Pumps','NOP'),
+            ('Drag Reduction (%)','DR'),
+            ('Pump Speed (RPM)','N'),
+            ('Pump Efficiency (%)','EFFP'),
+            ('Station Discharge Head (m)','SDHA'),
+            ('Residual Head (m)','RH'),
+            ('Power Cost (₹)','OF_POWER'),
+            ('DRA Cost (₹)','OF_DRA')
+        ])
+        # Build results table
+        data = {}
+        for label, base in params.items():
+            row = []
+            for stn, idx in stations.items():
+                # Chotila & Viramgam: only RH
+                if stn in ['Chotila','Viramgam'] and base != 'RH':
+                    val = 0.0
                 else:
-                    comp = getattr(model, varname, None)
-                    val = float(pyo.value(comp)) if comp is not None else None
-            # format
-            if base=='NOP' and val is not None:
-                data[param].append(int(val))
-            elif base=='EFFP' and val is not None:
-                data[param].append(f"{val*100:.2f}%")
-            elif val is not None:
-                data[param].append(round(val,2))
-            else:
-                data[param].append(None)
-    df = pd.DataFrame(data, index=list(stations.keys())).T
-    st.subheader("Station-wise Parameter Summary")
-    st.table(df)
-    footer()
-else:
-    st.markdown("Enter inputs and click **Run Optimization** to view results.")
-    footer()
+                    # Construct var name
+                    varname = f"{base}_{idx}" if base in ['SDHA','OF_POWER','OF_DRA','RH'] else f"{base}{idx}"
+                    # Override RH1
+                    if base == 'RH' and stn == 'Vadinar':
+                        val = 50.0
+                    else:
+                        comp = getattr(model, varname, None)
+                        val = pyo.value(comp) if comp is not None else None
+                # Formatting
+                if base == 'NOP':
+                    row.append(int(val) if val is not None else None)
+                elif base == 'EFFP':
+                    row.append(f"{val*100:.2f}%" if val is not None else None)
+                else:
+                    row.append(round(val,2) if val is not None else None)
+            data[label] = row
+        df = pd.DataFrame(data, index=list(stations.keys())).T
+        st.subheader("Station-wise Parameter Summary")
+        st.table(df)
+        footer()
+    else:
+        st.markdown("Enter inputs and click **Run Optimization** to view results.")
+        footer()
+
+if __name__ == '__main__':
+    main()
