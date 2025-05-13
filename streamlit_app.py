@@ -81,7 +81,9 @@ if st.sidebar.button("Run Optimization"):
                 varname = f"{base}{idx}" if base not in ['SDHA','OF_POWER','OF_DRA','RH'] else f"{base}_{idx}"
                 if base=='RH' and stn=='Vadinar': val = 50.0
                 else:
-                    vobj = ns.get(varname) if varname in ns else getattr(model,varname)
+                    vobj = ns.get(varname, None)
+            if vobj is None:
+                vobj = getattr(model, varname, None)
                     val = float(pyo.value(vobj))
             # formatting
             if base=='NOP': data[param].append(int(val))
