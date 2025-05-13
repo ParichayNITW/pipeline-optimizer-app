@@ -106,10 +106,12 @@ if st.sidebar.button("🚀 Run Optimization"):
     # Summary metrics display
     st.markdown("### Summary Metrics")
     cols = st.columns(4)
+    avg_eff_str = f"{avg_eff:.2f}" if avg_eff is not None else "N/A"
+    avg_dra_str = f"{avg_dra:.2f}" if avg_dra is not None else "N/A"
     cols[0].metric("💰 Total Operating Cost (₹)", f"{total_cost:,.2f}")
     cols[1].metric("⚙️ Total Pumps", f"{int(total_pumps)}")
-    cols[2].metric("⚙️ Avg Pump Efficiency (%)", f"{avg_eff:.2f}")
-    cols[3].metric("🔥 Avg DRA Dosage (%)", f"{avg_dra:.2f}")
+    cols[2].metric("⚙️ Avg Pump Efficiency (%)", avg_eff_str)
+    cols[3].metric("🔥 Avg DRA Dosage (%)", avg_dra_str)
 
     # DataFrame and charts
     df = pd.DataFrame(rows).set_index('Station')
