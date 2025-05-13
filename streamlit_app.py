@@ -71,26 +71,52 @@ if st.sidebar.button("Run Optimization"):
 
     # Build result DataFrame
     data = {param:[] for param in desired.keys()}
+        # Build result DataFrame
+    data = {param: [] for param in desired.keys()}
     for param, base in desired.items():
         for stn, idx in stations.items():
             # Only RH for Chotila/Viramgam, others zero
             if stn in ['Chotila','Viramgam']:
-                if base=='RH': val = float(pyo.value(ns.get(f"RH_{idx}", getattr(model,f"RH_{idx}"))))
-                else: val = 0.0
+                if base == 'RH':
+                    rh_var = f"RH_{idx}"
+                    try:
+                        val = float(pyo.value(ns.get(rh_var, getattr(model, rh_var))))
+                    except:
+                        val = None
+                else:
+                    val = 0.0
             else:
-                varname = f"{base}{idx}" if base not in ['SDHA','OF_POWER','OF_DRA','RH'] else f"{base}_{idx}"
-                if base=='RH' and stn=='Vadinar': val = 50.0
+                # Determine variable name
+                if base in ['SDHA','OF_POWER','OF_DRA','RH']:
+                    varname = f"{base}_{idx}"
+                else:
+                    varname = f"{base}{idx}"
+                # Override RH1
+                if base == 'RH' and stn == 'Vadinar':
+                    val = 50.0
                 else:
                     vobj = ns.get(varname, None)
-            if vobj is None:
-                vobj = getattr(model, varname, None)
-                    val = float(pyo.value(vobj))
-            # formatting
-            if base=='NOP': data[param].append(int(val))
-            elif base=='EFFP': data[param].append(f"{val*100:.2f}%")
-            else: data[param].append(round(val,2))
+                    if vobj is None:
+                        vobj = getattr(model, varname, None)
+                    try:
+                        val = float(pyo.value(vobj))
+                    except:
+                        val = None
+            # Formatting
+            if base == 'NOP' and val is not None:
+                data[param].append(int(val))
+            elif base == 'EFFP' and val is not None:
+                data[param].append(f"{val*100:.2f}%")
+            elif val is not None:
+                data[param].append(round(val, 2))
+            else:
+                data[param].append(None)
 
     df = pd.DataFrame(data, index=list(stations.keys())).T
+    st.subheader("Station-wise Parameter Summary")
+    st.table(df)
+    footer()
+else:(data, index=list(stations.keys())).T
     st.subheader("Station-wise Parameter Summary")
     st.table(df)
     footer()
