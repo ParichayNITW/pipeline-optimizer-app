@@ -69,13 +69,11 @@ if st.sidebar.button("Run Optimization"):
         ('Residual Head (m)','RH'),('Power Cost (₹)','OF_POWER'),('DRA Cost (₹)','OF_DRA')
     ])
 
-    # Build result DataFrame
-    data = {param:[] for param in desired.keys()}
         # Build result DataFrame
     data = {param: [] for param in desired.keys()}
     for param, base in desired.items():
         for stn, idx in stations.items():
-            # Only RH for Chotila/Viramgam, others zero
+            # Chotila & Viramgam: only RH row
             if stn in ['Chotila','Viramgam']:
                 if base == 'RH':
                     rh_var = f"RH_{idx}"
@@ -86,7 +84,7 @@ if st.sidebar.button("Run Optimization"):
                 else:
                     val = 0.0
             else:
-                # Determine variable name
+                # Build varname
                 if base in ['SDHA','OF_POWER','OF_DRA','RH']:
                     varname = f"{base}_{idx}"
                 else:
@@ -95,9 +93,7 @@ if st.sidebar.button("Run Optimization"):
                 if base == 'RH' and stn == 'Vadinar':
                     val = 50.0
                 else:
-                    vobj = ns.get(varname, None)
-                    if vobj is None:
-                        vobj = getattr(model, varname, None)
+                    vobj = ns.get(varname) or getattr(model, varname, None)
                     try:
                         val = float(pyo.value(vobj))
                     except:
@@ -111,10 +107,11 @@ if st.sidebar.button("Run Optimization"):
                 data[param].append(round(val, 2))
             else:
                 data[param].append(None)
-
-        df = pd.DataFrame(data, index=list(stations.keys())).T
+    # Create and display DataFrame
+    df = pd.DataFrame(data, index=list(stations.keys())).T
     st.subheader("Station-wise Parameter Summary")
     st.table(df)
+    footer()
     footer()
 else:
     st.markdown("Enter pipeline inputs and click **Run Optimization** to view results.")
