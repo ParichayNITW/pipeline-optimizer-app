@@ -91,7 +91,6 @@ RateDRA   = st.sidebar.number_input("DRA Rate (Rs/L)", value=9.0)
 Price_HSD = st.sidebar.number_input("HSD Price (Rs/L)", value=80.0)
 
 # Main app
-
 def main():
     if st.sidebar.button("Run Optimization"):
         with st.spinner("Running optimization on NEOS..."):
@@ -107,15 +106,16 @@ def main():
         df = pd.DataFrame(rows).set_index('Station')
         # Format columns
         df['No. of Pumps'] = df['No. of Pumps'].fillna(0).astype(int)
+        df.loc[df['No. of Pumps']==0, 'Pump Speed (RPM)'] = 0.00
         df['Pump Speed (RPM)'] = df['Pump Speed (RPM)'].round(2)
+        df.loc[df['No. of Pumps']==0, 'Pump Efficiency Fraction'] = 0.0
+        df['Pump Efficiency (%)'] = df['Pump Efficiency Fraction'].apply(
+            lambda x: f"{x*100:.2f}%"
+        )
         df['Residual Head (m)'] = df['Residual Head (m)'].round(2)
         df['Station Discharge Head (m)'] = df['Station Discharge Head (m)'].round(2)
         df['Power Cost (₹)'] = df['Power Cost (₹)'].round(2)
         df['DRA Cost (₹)'] = df['DRA Cost (₹)'].round(2)
-        # Convert efficiency fraction to percentage string
-        df['Pump Efficiency (%)'] = df['Pump Efficiency Fraction'].apply(
-            lambda x: f"{x*100:.2f}%" if x is not None else None
-        )
         df.drop(columns=['Pump Efficiency Fraction'], inplace=True)
 
         # Display station-wise table
