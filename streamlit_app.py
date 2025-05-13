@@ -30,7 +30,6 @@ SCRIPT = load_script()
 # Cached data function: returns only serializable results
 @st.cache_data(show_spinner=False)
 def get_results(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
-    # Prepare namespace and execute
     local = dict(
         os=os,
         pyo=pyo,
@@ -44,7 +43,6 @@ def get_results(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
     solver = SolverManagerFactory('neos')
     solver.solve(model, opt='bonmin', tee=False)
 
-    # Build station-wise rows
     stations = [
         {"name":"Vadinar","idx":"1","dr":"1","power":"1","dra":"1","effp":"1"},
         {"name":"Jamnagar","idx":"2","dr":"2","power":"2","dra":"2","effp":"2"},
@@ -66,16 +64,15 @@ def get_results(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
         row = {"Station": s["name"]}
         i = s["idx"]
         row["No. of Pumps"] = val(f"NOP{i}")
-        row["Drag Reduction (%)"] = val(f"DR{s['dr']}" ) if s['dr'] else None
+        row["Drag Reduction (%)"] = val(f"DR{s['dr']}") if s['dr'] else None
         row["Pump Speed (RPM)"] = val(f"N{i}")
         row["Residual Head (m)"] = val(f"RH{i}")
         row["Station Discharge Head (m)"] = val(f"SDHA_{i}")
-        row["Pump Efficiency (%)"] = val(f"EFFP{s['effp']}" ) if s['effp'] else None
+        row["Pump Efficiency (%)"] = val(f"EFFP{s['effp']}") if s['effp'] else None
         row["Power Cost (₹)"] = val(f"OF_POWER_{s['power']}") if s['power'] else None
         row["DRA Cost (₹)"] = val(f"OF_DRA_{s['dra']}") if s['dra'] else None
         rows.append(row)
 
-    # Summary metrics
     total_cost = float(pyo.value(model.Objf))
     total_pumps = sum(r.get("No. of Pumps", 0) or 0 for r in rows)
     effs = [r["Pump Efficiency (%)"] for r in rows if r.get("Pump Efficiency (%)") is not None]
@@ -103,7 +100,7 @@ if st.sidebar.button("🚀 Run Optimization"):
         )
     st.success("✅ Optimization Complete!")
 
-    # Summary metrics display
+    # Summary metrics
     st.markdown("### Summary Metrics")
     cols = st.columns(4)
     avg_eff_str = f"{avg_eff:.2f}" if avg_eff is not None else "N/A"
@@ -113,29 +110,22 @@ if st.sidebar.button("🚀 Run Optimization"):
     cols[2].metric("⚙️ Avg Pump Efficiency (%)", avg_eff_str)
     cols[3].metric("🔥 Avg DRA Dosage (%)", avg_dra_str)
 
-    # DataFrame and charts
+    # Display results DataFrame
     df = pd.DataFrame(rows).set_index('Station')
     st.markdown("---")
     st.subheader("Station-wise Results")
-    fmt = {col:"{:.2f}" for col in df.columns}
-    st.dataframe(df.style.format(fmt).highlight_max(axis=0), use_container_width=True)
+    df_display = df.round(2)
+    st.dataframe(df_display, use_container_width=True)
 
+    # Performance charts
     st.markdown("---")
     st.subheader("Performance Charts")
     c1, c2 = st.columns(2)
-    c1.bar_chart(pd.DataFrame(
-        {"No. of Pumps": df['No. of Pumps']}
-    ), use_container_width=True)
-    c2.line_chart(pd.DataFrame(
-        {"Pump Speed (RPM)": df['Pump Speed (RPM)']}
-    ), use_container_width=True)
+    c1.bar_chart(df_display['No. of Pumps'], use_container_width=True)
+    c2.line_chart(df_display['Pump Speed (RPM)'], use_container_width=True)
     c3, c4 = st.columns(2)
-    c3.bar_chart(pd.DataFrame(
-        {"Power Cost (₹)": df['Power Cost (₹)']}
-    ), use_container_width=True)
-    c4.bar_chart(pd.DataFrame(
-        {"DRA Cost (₹)": df['DRA Cost (₹)']}
-    ), use_container_width=True)
+    c3.bar_chart(df_display['Power Cost (₹)'], use_container_width=True)
+    c4.bar_chart(df_display['DRA Cost (₹)'], use_container_width=True)
 
 else:
     st.title("Pipeline Optimization App")
