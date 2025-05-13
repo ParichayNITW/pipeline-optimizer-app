@@ -35,7 +35,7 @@ def footer():
 # Configure NEOS solver email
 os.environ['NEOS_EMAIL'] = 'parichay.nitwarangal@gmail.com'
 
-# Load and sanitize the Pyomo model (cached)
+# Load and sanitize the Pyomo model script once
 @st.cache_resource
 def load_script():
     with open('opt.txt') as f:
@@ -48,28 +48,29 @@ def load_script():
 
 SCRIPT = load_script()
 
-# Solve model and return results
-@st.cache_data
+# Solve model and return raw values (no caching to avoid pickling issues)
 def solve_model(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
+    # Prepare namespace
     ns = dict(
         os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
         FLOW=FLOW, KV=KV, rho=rho,
         SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
         RateDRA=RateDRA, Price_HSD=Price_HSD
     )
+    # Build and solve model
     exec(SCRIPT, ns)
     model = ns['model']
     solver = SolverManagerFactory('neos')
     solver.solve(model, opt='bonmin', tee=False)
     return model, ns
 
-# Main logic
+# Main app logic
 if st.sidebar.button("Run Optimization"):
     with st.spinner("Optimizing via NEOS... please wait"):
         model, ns = solve_model(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD)
     st.success("Optimization Complete!")
 
-    # Display total operating cost (large, bold)
+    # Display total operating cost (bold, large)
     total_cost = pyo.value(model.Objf)
     st.markdown(
         f"<h1 style='text-align:center; font-weight:bold;'>"
@@ -77,9 +78,8 @@ if st.sidebar.button("Run Optimization"):
         f"</h1>", unsafe_allow_html=True
     )
 
-    # Define stations of interest
+    # Define stations and parameters
     stations = {'Vadinar':1, 'Jamnagar':2, 'Rajkot':3, 'Surendranagar':5}
-    # Parameters mapping
     params = {
         'No. of Pumps': 'NOP',
         'Drag Reduction (%)': 'DR',
@@ -91,37 +91,29 @@ if st.sidebar.button("Run Optimization"):
         'Pump Head Developed (m)': 'TDHA_PUMP',
         'Residual Head (m)': 'RH'
     }
-    # Build transposed DataFrame
-    data = {}
+    # Build transposed results
+    result_data = {}
     for station, idx in stations.items():
-        values = []
-        for label, base in params.items():
-            var = f"{base}{idx}"
-            # get from namespace or model
-            if var in ns:
-                val_obj = ns[var]
-            elif hasattr(model, var):
-                val_obj = getattr(model, var)
-            else:
-                val_obj = None
+        row = []
+        for label, key in params.items():
+            var_name = f"{key}{idx}"
+            val_obj = ns.get(var_name) if var_name in ns else getattr(model, var_name, None)
             try:
                 num = float(pyo.value(val_obj))
             except:
-                num = float(val_obj) if isinstance(val_obj, (int,float)) else None
-            # No decimal for pumps
+                num = float(val_obj) if isinstance(val_obj, (int, float)) else None
+            # Format integers and decimals
             if label=='No. of Pumps' and num is not None:
                 num = int(num)
-            # Two decimals otherwise
-            if num is not None and label!='No. of Pumps':
-                num = round(num,2)
-            values.append(num)
-        data[station] = values
-    df = pd.DataFrame(data, index=list(params.keys()))
+            elif num is not None:
+                num = round(num, 2)
+            row.append(num)
+        result_data[station] = row
+    df = pd.DataFrame(result_data, index=list(params.keys()))
 
-    # Table title and display
+    # Display table
     st.subheader("Station-wise Parameter Summary")
     st.table(df)
-
     footer()
 else:
     st.markdown("Enter your pipeline inputs in the sidebar and click **Run Optimization** to view results.")
