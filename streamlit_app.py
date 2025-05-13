@@ -1,123 +1,108 @@
-import os, re
+import os
 import streamlit as st
 import pyomo.environ as pyo
-from pyomo.opt import SolverManagerFactory
-import pandas as pd
-from collections import OrderedDict
+from pyomo.opt import SolverFactory
 
-# Page configuration
-st.set_page_config(
-    page_title="Mixed Integer Non-Linear Convex Optimisation of Pipeline Operations",
-    layout="wide"
-)
-st.title("Mixed Integer Non-Linear Convex Optimisation of Pipeline Operations")
+# Page setup
+st.set_page_config(page_title="Pipeline Optimizer", layout="wide")
+st.title("Pipeline Optimizer")
 
-# Sidebar inputs
-st.sidebar.header("Pipeline Inputs")
-FLOW      = st.sidebar.number_input("Flow rate (KL/Hr)", value=1000.0)
-KV        = st.sidebar.number_input("Kinematic Viscosity (cSt)", value=10.0)
-rho       = st.sidebar.number_input("Density (kg/m3)", value=850.0)
-SFC_J     = st.sidebar.number_input("SFC at Jamnagar (gm/bhp/hr)", value=200.0)
-SFC_R     = st.sidebar.number_input("SFC at Rajkot (gm/bhp/hr)", value=200.0)
-SFC_S     = st.sidebar.number_input("SFC at Surendranagar (gm/bhp/hr)", value=200.0)
-RateDRA   = st.sidebar.number_input("DRA Rate (Rs/L)", value=9.0)
-Price_HSD = st.sidebar.number_input("HSD Price (Rs/L)", value=80.0)
+# Sidebar inputs with full labels
+flow_rate = st.sidebar.number_input("Flow rate (kiloliters per hour)", value=1000.0)
+kinematic_viscosity = st.sidebar.number_input("Kinematic viscosity (centistokes)", value=10.0)
+density = st.sidebar.number_input("Density (kilograms per cubic meter)", value=850.0)
+specific_fuel_consumption = st.sidebar.number_input("Specific fuel consumption (grams per brake horsepower-hour)", value=200.0)
+dra_cost_rate = st.sidebar.number_input("Drag reducing agent cost rate (rupees per liter)", value=9.0)
+hsd_price = st.sidebar.number_input("High-speed diesel price (rupees per liter)", value=80.0)
 
-# Footer function
-def footer():
-    st.markdown("---")
-    st.markdown(
-        "<div style='text-align:center; color:gray; font-size:12px;'>"
-        "© 2025 Developed by Parichay Das. All rights reserved."
-        "</div>", unsafe_allow_html=True
-    )
+# Load the Pyomo model from opt.txt
+with open('opt.txt') as f:
+    model_script = f.read()
 
-# Set NEOS email for remote solves
-os.environ['NEOS_EMAIL'] = 'parichay.nitwarangal@gmail.com'
-
-# Load and clean Pyomo script (no caching to avoid micropip issues)
-def load_script():
-    with open('opt.txt') as f:
-        lines = [l for l in f if not l.strip().startswith(('!pip','print','input'))]
-    return ''.join(lines)
-
-SCRIPT = load_script()
-
-# Solve model and return Pyomo model
-def solve_model():
-    # Prepare namespace for exec
+# Solve function
+@st.cache_resource
+def solve_pipeline_model(flow, viscosity, rho, sfc, dra_rate, diesel_price):
     ns = dict(
-        os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
-        FLOW=FLOW, KV=KV, rho=rho,
-        SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
-        RateDRA=RateDRA, Price_HSD=Price_HSD
+        FLOW=flow,
+        KV=viscosity,
+        rho=rho,
+        SFC=sfc,
+        RateDRA=dra_rate,
+        PriceHSD=diesel_price,
+        pyo=pyo
     )
-    exec(SCRIPT, ns)
+    exec(model_script, ns)
     model = ns['model']
-    # Solve remotely via NEOS
-    SolverManagerFactory('neos').solve(model, opt='bonmin', tee=False)
+    solver = SolverFactory('bonmin')
+    solver.solve(model)
     return model
 
-# Run optimization and display results
-def main():
-    if st.sidebar.button("Run Optimization"):
-        model = solve_model()
-        # Total Operating Cost
-        total = pyo.value(model.Objf)
-        st.markdown(
-            f"<h1 style='text-align:center; font-weight:bold;'>"
-            f"Total Operating Cost: ₹{total:,.2f}"
-            f"</h1>", unsafe_allow_html=True
-        )
+# Map station indices to names
+station_names = {
+    '1': 'Vadinar',
+    '2': 'Jamnagar',
+    '3': 'Rajkot',
+    '4': 'Chotila',
+    '5': 'Surendranagar',
+    '6': 'Viramgam'
+}
 
-        # Station codes
-        stations = OrderedDict([
-            ('Vadinar','1'), ('Jamnagar','2'), ('Rajkot','3'),
-            ('Chotila','4'), ('Surendranagar','5'), ('Viramgam','6')
-        ])
-        # Desired outputs
-        params = OrderedDict([
-            ('No. of Pumps','NOP'),
-            ('Drag Reduction (%)','DR'),
-            ('Pump Speed (RPM)','N'),
-            ('Pump Efficiency (%)','EFFP'),
-            ('Station Discharge Head (m)','SDHA'),
-            ('Residual Head (m)','RH'),
-            ('Power Cost (₹)','OF_POWER'),
-            ('DRA Cost (₹)','OF_DRA')
-        ])
-        # Build results table
-        data = {}
-        for label, base in params.items():
-            row = []
-            for stn, idx in stations.items():
-                # Chotila & Viramgam: only RH
-                if stn in ['Chotila','Viramgam'] and base != 'RH':
-                    val = 0.0
-                else:
-                    # Construct var name
-                    varname = f"{base}_{idx}" if base in ['SDHA','OF_POWER','OF_DRA','RH'] else f"{base}{idx}"
-                    # Override RH1
-                    if base == 'RH' and stn == 'Vadinar':
-                        val = 50.0
-                    else:
-                        comp = getattr(model, varname, None)
-                        val = pyo.value(comp) if comp is not None else None
-                # Formatting
-                if base == 'NOP':
-                    row.append(int(val) if val is not None else None)
-                elif base == 'EFFP':
-                    row.append(f"{val*100:.2f}%" if val is not None else None)
-                else:
-                    row.append(round(val,2) if val is not None else None)
-            data[label] = row
-        df = pd.DataFrame(data, index=list(stations.keys())).T
-        st.subheader("Station-wise Parameter Summary")
-        st.table(df)
-        footer()
-    else:
-        st.markdown("Enter inputs and click **Run Optimization** to view results.")
-        footer()
+if st.sidebar.button("Run Optimization"):
+    model = solve_pipeline_model(
+        flow_rate,
+        kinematic_viscosity,
+        density,
+        specific_fuel_consumption,
+        dra_cost_rate,
+        hsd_price
+    )
+    st.header("Optimization Results")
+    # Display the objective
+    total_cost = pyo.value(model.Objf)
+    st.write(f"**Total Operating Cost (₹):** {total_cost:,.2f}")
 
-if __name__ == '__main__':
-    main()
+        # Loop over stations for detailed outputs
+    for idx, name in station_names.items():
+        st.subheader(f"Station: {name}")
+        # Number of pumps
+        var_nop = f"NOP{idx}"
+        num_pumps = int(pyo.value(getattr(model, var_nop))) if hasattr(model, var_nop) else None
+        st.write(f"- Number of Pumps: {num_pumps}")
+        # Drag Reduction
+        var_dr = f"DR{idx}"
+        if hasattr(model, var_dr):
+            dr = pyo.value(getattr(model, var_dr))
+            st.write(f"- Drag Reduction (%): {dr:.2f}")
+        # Pump Speed
+        var_n = f"N{idx}"
+        if hasattr(model, var_n):
+            speed = pyo.value(getattr(model, var_n))
+            st.write(f"- Pump Speed (RPM): {speed:.2f}")
+        # Pump Efficiency
+        var_eff = f"EFFP{idx}"
+        if hasattr(model, var_eff):
+            eff = pyo.value(getattr(model, var_eff))*100
+            st.write(f"- Pump Efficiency (%): {eff:.2f}")
+        # Station Discharge Head
+        var_sdha = f"SDHA{idx}"
+        if hasattr(model, var_sdha):
+            sdha = pyo.value(getattr(model, var_sdha))
+            st.write(f"- Station Discharge Head (m): {sdha:.2f}")
+        # Residual Head
+        var_rh = f"RH{idx}"
+        if hasattr(model, var_rh):
+            rh = pyo.value(getattr(model, var_rh))
+            st.write(f"- Residual Head (m): {rh:.2f}")
+        # Power Cost
+        var_pow = f"OF_POWER{idx}"
+        if hasattr(model, var_pow):
+            powc = pyo.value(getattr(model, var_pow))
+            st.write(f"- Power Cost (₹): {powc:.2f}")
+        # DRA Cost
+        var_dra = f"OF_DRA{idx}"
+        if hasattr(model, var_dra):
+            drac = pyo.value(getattr(model, var_dra))
+            st.write(f"- DRA Cost (₹): {drac:.2f}")
+else:
+    st.write("Enter all inputs in the sidebar and click **Run Optimization** to view results.")
+    st.write("Enter all inputs in the sidebar and click **Run Optimization** to view results.")
