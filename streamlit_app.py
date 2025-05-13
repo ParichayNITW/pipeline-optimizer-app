@@ -14,11 +14,17 @@ st.set_page_config(
 # Header with logos and title
 col1, col2, col3 = st.columns([1,6,1])
 with col1:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Indian_Oil_Corporation_Logo.svg/120px-Indian_Oil_Corporation_Logo.svg.png", width=60)
+    st.image(
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Indian_Oil_Corporation_Logo.svg/120px-Indian_Oil_Corporation_Logo.svg.png",
+        width=60
+    )
 with col2:
     st.markdown("# Mixed Integer Non-Linear Convex Optimisation of Pipeline Operations")
 with col3:
-    st.image("https://images.unsplash.com/photo-1590487988183-7fd160517c9d?auto=format&fit=crop&w=120&q=60", width=60)
+    st.image(
+        "https://images.unsplash.com/photo-1590487988183-7fd160517c9d?auto=format&fit=crop&w=120&q=60",
+        width=60
+    )
 
 # Sidebar inputs
 st.sidebar.header("Pipeline Inputs")
@@ -36,14 +42,14 @@ def footer():
     st.markdown("---")
     st.markdown(
         "<div style='text-align:center; color:gray; font-size:12px;'>"
-        "© 2025 Developed by Parichay Das. All rights reserved."  
+        "© 2025 Developed by Parichay Das. All rights reserved."
         "</div>", unsafe_allow_html=True
     )
 
 # Configure NEOS solver email
 os.environ['NEOS_EMAIL'] = 'parichay.nitwarangal@gmail.com'
 
-# Load and sanitize Pyomo model script (cached)
+# Load and sanitize Pyomo model script
 @st.cache_resource
 def load_script():
     with open('opt.txt') as f:
@@ -58,10 +64,12 @@ SCRIPT = load_script()
 
 # Solve model and return model + namespace
 def solve_model(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
-    ns = dict(os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
-              FLOW=FLOW, KV=KV, rho=rho,
-              SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
-              RateDRA=RateDRA, Price_HSD=Price_HSD)
+    ns = dict(
+        os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
+        FLOW=FLOW, KV=KV, rho=rho,
+        SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
+        RateDRA=RateDRA, Price_HSD=Price_HSD
+    )
     exec(SCRIPT, ns)
     model = ns['model']
     solver = SolverManagerFactory('neos')
@@ -77,11 +85,12 @@ if st.sidebar.button("Run Optimization"):
     # Display total cost
     total_cost = pyo.value(model.Objf)
     st.markdown(
-        f"<h1 style='text-align:center; font-weight:bold;'>Total Operating Cost: ₹{total_cost:,.2f}</h1>",
-        unsafe_allow_html=True
+        f"<h1 style='text-align:center; font-weight:bold;'>"
+        f"Total Operating Cost: ₹{total_cost:,.2f}"
+        f"</h1>", unsafe_allow_html=True
     )
 
-    # Stations and parameters
+    # Stations and parameter definitions
     stations_info = OrderedDict([
         ('Vadinar',       {'idx':'1','dr_idx':'1'}),
         ('Jamnagar',      {'idx':'2','dr_idx':'2'}),
@@ -112,8 +121,8 @@ if st.sidebar.button("Run Optimization"):
     e_idx = keys.index('Pump Efficiency (%)')
     rh_idx = keys.index('Residual Head (m)')
 
-    # Build table data
-    result_data = OrderedDict()
+    # Build result rows
+    rows = []
     for station, info in stations_info.items():
         row = []
         for label, (base, fld) in params.items():
@@ -121,42 +130,46 @@ if st.sidebar.button("Run Optimization"):
             if idx is None:
                 row.append(None)
                 continue
-            # choose delimiter
             delim = '_' if base in ['MAOP','DH','TDHA_PUMP','SDHA','OF_POWER','OF_DRA','RH'] else ''
-            varname = f"{base}{delim}{idx}" if delim=='' else f"{base}{delim}{idx}"
+            varname = f"{base}{delim}{idx}"
             v = ns.get(varname) if varname in ns else getattr(model, varname, None)
             try:
-                val = float(pyo.value(v))
+                num = float(pyo.value(v))
             except:
-                val = float(v) if isinstance(v,(int,float)) else None
-            if label=='No. of Pumps' and val is not None:
-                val = int(val)
-            elif val is not None:
-                val = round(val,2)
-            row.append(val)
+                num = float(v) if isinstance(v, (int, float)) else None
+            if label == 'No. of Pumps' and num is not None:
+                num = int(num)
+            elif num is not None:
+                num = round(num, 2)
+            row.append(num)
         # override RH1
-        if station=='Vadinar': row[rh_idx]=50.00
-        # Chotila & Viramgam only RH
+        if station == 'Vadinar': row[rh_idx] = 50.00
+        # Chotila & Viramgam only show RH
         if station in ['Chotila','Viramgam']:
             rh = row[rh_idx]
             row = [None]*len(keys)
-            row[rh_idx]=rh
-        # speed/eff zero when no pumps
-        if station not in ['Chotila','Viramgam'] and row[p_idx]==0:
-            row[s_idx]=0.00; row[e_idx]='0.00%'
-        # efficiency percent
-        if station not in ['Chotila','Viramgam'] and row[p_idx]>0:
-            frac=row[e_idx]; row[e_idx]=f"{frac*100:.2f}%" if frac is not None else None
-        result_data[station]=row
+            row[rh_idx] = rh
+        # speed and efficiency adjustments
+        if station not in ['Chotila','Viramgam'] and row[p_idx] == 0:
+            row[s_idx] = 0.00
+            row[e_idx] = '0.00%'
+        if station not in ['Chotila','Viramgam'] and row[p_idx] > 0:
+            frac = row[e_idx]
+            row[e_idx] = f"{frac*100:.2f}%" if frac is not None else None
+        rows.append(row)
 
-            # Build DataFrame for styling
-    df = pd.DataFrame(result_data, index=keys)
+    # Create DataFrame
+    df = pd.DataFrame(rows, index=list(stations_info.keys()), columns=keys).T
+
+    # Style and display
     st.subheader("Station-wise Parameter Summary")
-    # Style DataFrame: conditional formatting and gradient
     styled = df.style \
         .format(precision=2) \
-        .applymap(lambda v: "font-weight: bold;" if isinstance(v, int) else "", subset=["No. of Pumps"]) \
-        .background_gradient(subset=[c for c in df.columns if c != "No. of Pumps"], cmap="Blues", axis=0) \
-        .highlight_max(color="lightgreen", axis=1)
+        .applymap(lambda v: 'font-weight:bold;' if isinstance(v, int) else '', subset=['No. of Pumps']) \
+        .background_gradient(cmap='Blues', subset=[c for c in df.columns if c!='No. of Pumps']) \
+        .highlight_max(axis=1)
     st.dataframe(styled, use_container_width=True)
+    footer()
+else:
+    st.markdown("Enter your pipeline inputs in the sidebar and click **Run Optimization** to view results.")
     footer()
