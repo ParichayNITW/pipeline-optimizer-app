@@ -134,8 +134,10 @@ if st.sidebar.button("Run Optimization"):
         rows.append(row)
 
     df = pd.DataFrame(rows).set_index('Parameter')
-    st.subheader("Station-wise Parameter Summary")
-    st.table(df)
+# Only show raw output values without parameter labels
+df_values = df.values
+st.subheader("Station-wise Parameter Summary")
+st.table(df_values)
     footer()
 else:
     st.markdown("Enter inputs and click **Run Optimization** to view results.")
