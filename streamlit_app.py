@@ -28,14 +28,13 @@ SCRIPT = load_script()
 
 # Run optimization and extract variables
 def run_optimization(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
-    # Prepare namespace
+    # Prepare namespace and define model
     local = dict(
         os=os, pyo=pyo, SolverManagerFactory=SolverManagerFactory,
         FLOW=FLOW, KV=KV, rho=rho,
         SFC_J=SFC_J, SFC_R=SFC_R, SFC_S=SFC_S,
         RateDRA=RateDRA, Price_HSD=Price_HSD
     )
-    # Execute model definition
     exec(SCRIPT, local)
     model = local['model']
     # Solve on NEOS
@@ -44,18 +43,11 @@ def run_optimization(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
 
     # Helper to get numeric values
     def val(key):
-        if key in local:
-            v = local[key]
-        elif hasattr(model, key):
-            v = getattr(model, key)
-        else:
-            return None
+        v = local.get(key) if key in local else getattr(model, key, None)
         try:
             return float(pyo.value(v))
         except:
-            if isinstance(v, (int, float)):
-                return float(v)
-            return None
+            return float(v) if isinstance(v, (int, float)) else None
 
     # Define mapping for each station
     mapping = [
@@ -65,14 +57,28 @@ def run_optimization(FLOW, KV, rho, SFC_J, SFC_R, SFC_S, RateDRA, Price_HSD):
         {'Station': 'Surendranagar', 'NOP': 'NOP5', 'DR': 'DR5', 'Speed': 'N5', 'Residual Head': 'RH6', 'Discharge Head': 'SDHA_4', 'Efficiency': 'EFFP5', 'Power Cost': 'OF_POWER_4', 'DRA Cost': 'OF_DRA_4'}
     ]
 
-    # Build results rows
+    # Build results rows with zero overrides
     rows = []
     for m in mapping:
-        row = {'Station': m['Station']}
-        for key,label in [('NOP','No. of Pumps'), ('DR','Drag Reduction (%)'), ('Speed','Pump Speed (RPM)'),
-                          ('Residual Head','Residual Head (m)'), ('Discharge Head','Station Discharge Head (m)'),
-                          ('Efficiency','Pump Efficiency Fraction'), ('Power Cost','Power Cost (₹)'), ('DRA Cost','DRA Cost (₹)')]:
-            row[label] = val(m[key])
+        nop_val = val(m['NOP']) or 0
+        row = {
+            'Station': m['Station'],
+            'No. of Pumps': nop_val,
+            'Drag Reduction (%)': val(m['DR']),
+            'Residual Head (m)': val(m['Residual Head']),
+            'Station Discharge Head (m)': val(m['Discharge Head']),
+            'Power Cost (₹)': val(m['Power Cost']),
+            'DRA Cost (₹)': val(m['DRA Cost'])
+        }
+        # Speed and efficiency
+        if nop_val == 0:
+            speed_val = 0.0
+            eff_val = 0.0
+        else:
+            speed_val = val(m['Speed'])
+            eff_val = val(m['Efficiency'])
+        row['Pump Speed (RPM)'] = speed_val
+        row['Pump Efficiency Fraction'] = eff_val
         rows.append(row)
 
     # Total operating cost
@@ -104,18 +110,12 @@ def main():
 
         # Prepare DataFrame
         df = pd.DataFrame(rows).set_index('Station')
-        # Format columns
-        df['No. of Pumps'] = df['No. of Pumps'].fillna(0).astype(int)
-        df.loc[df['No. of Pumps']==0, 'Pump Speed (RPM)'] = 0.00
-        df['Pump Speed (RPM)'] = df['Pump Speed (RPM)'].round(2)
-        df.loc[df['No. of Pumps']==0, 'Pump Efficiency Fraction'] = 0.0
-        df['Pump Efficiency (%)'] = df['Pump Efficiency Fraction'].apply(
-            lambda x: f"{x*100:.2f}%"
-        )
-        df['Residual Head (m)'] = df['Residual Head (m)'].round(2)
-        df['Station Discharge Head (m)'] = df['Station Discharge Head (m)'].round(2)
-        df['Power Cost (₹)'] = df['Power Cost (₹)'].round(2)
-        df['DRA Cost (₹)'] = df['DRA Cost (₹)'].round(2)
+        # Format numeric columns
+        df['No. of Pumps'] = df['No. of Pumps'].astype(int)
+        df[['Pump Speed (RPM)', 'Residual Head (m)', 'Station Discharge Head (m)', 'Power Cost (₹)', 'DRA Cost (₹)']] = \
+            df[['Pump Speed (RPM)', 'Residual Head (m)', 'Station Discharge Head (m)', 'Power Cost (₹)', 'DRA Cost (₹)']].round(2)
+        # Convert efficiency fraction to percentage and drop fraction
+        df['Pump Efficiency (%)'] = df['Pump Efficiency Fraction'].apply(lambda x: f"{x*100:.2f}%")
         df.drop(columns=['Pump Efficiency Fraction'], inplace=True)
 
         # Display station-wise table
